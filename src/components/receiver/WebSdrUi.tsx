@@ -233,7 +233,7 @@ export function WebSdrUi({
 
   const setModeForActiveVfo = useCallback(
     (nextMode: typeof mode) => {
-      const sanitized = nextMode === 'WBFM' && !canWbfm ? 'FM' : nextMode;
+      const sanitized = nextMode === 'WBFM' && audioMaxSps !== null && !canWbfm ? 'FM' : nextMode;
       // Avoid creating an update loop by re-applying the same mode and
       // emitting new passbandSet nonces while React state is catching up.
       if (liveRef.current.mode === sanitized) return;
@@ -258,8 +258,13 @@ export function WebSdrUi({
       passbandSetNonceRef.current += 1;
       setPassbandSet({ nonce: passbandSetNonceRef.current, l: pb.l, m: pb.m, r: pb.r });
     },
-    [canWbfm, passbandForTune, writeActiveVfo],
+    [audioMaxSps, canWbfm, passbandForTune, writeActiveVfo],
   );
+
+  useEffect(() => {
+    if (audioMaxSps === null || canWbfm || liveRef.current.mode !== 'WBFM') return;
+    setModeForActiveVfo('FM');
+  }, [audioMaxSps, canWbfm, setModeForActiveVfo]);
 
   const tuneTo = useCallback(
     (hz: number, nextMode?: typeof mode, receiverOverride?: string) => {
@@ -268,7 +273,7 @@ export function WebSdrUi({
 
       const requestedReceiverId = receiverOverride ?? (preferReceiverRef.current?.(targetHz) ?? receiverId);
       const rawMode = nextMode ?? liveRef.current.mode;
-      const sanitizedMode = rawMode === 'WBFM' && !canWbfm ? 'FM' : rawMode;
+      const sanitizedMode = rawMode === 'WBFM' && audioMaxSps !== null && !canWbfm ? 'FM' : rawMode;
       if (requestedReceiverId && requestedReceiverId !== receiverId) {
         defaultsAppliedRef.current = false;
         suppressAutoBandRef.current = true;
@@ -298,7 +303,7 @@ export function WebSdrUi({
       defaultsAppliedRef.current = true;
       requestFrequencySetHz(targetHz);
     },
-    [canWbfm, onReceiverChange, passbandForTune, receiverId, requestFrequencySetHz, setModeForActiveVfo],
+    [audioMaxSps, canWbfm, onReceiverChange, passbandForTune, receiverId, requestFrequencySetHz, setModeForActiveVfo],
   );
 
   useEffect(() => {
