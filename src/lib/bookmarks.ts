@@ -5,6 +5,7 @@ export type Bookmark = {
   name: string;
   frequencyHz: number;
   mode: ReceiverMode;
+  bandwidthHz?: number;
   notes?: string;
   createdAtMs: number;
 };
@@ -19,7 +20,8 @@ function isBookmark(v: unknown): v is Bookmark {
     typeof obj.name === 'string' &&
     typeof obj.frequencyHz === 'number' &&
     typeof obj.mode === 'string' &&
-    typeof obj.createdAtMs === 'number'
+    typeof obj.createdAtMs === 'number' &&
+    (obj.bandwidthHz === undefined || (typeof obj.bandwidthHz === 'number' && Number.isFinite(obj.bandwidthHz) && obj.bandwidthHz > 0))
   );
 }
 
@@ -52,5 +54,4 @@ export function importBookmarks(raw: string): Bookmark[] {
 export function createBookmarkId(): string {
   return `bm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
-
 

@@ -26,7 +26,7 @@ type Props = {
   onCenterHzChange?: (hz: number | null) => void;
   autoBandMode: boolean;
   onPreferReceiverForFrequencyHz?: (hz: number) => string | null;
-  initialUrlTune?: { receiverId: string; frequencyHz: number | null; mode: ReceiverMode | null } | null;
+  initialUrlTune?: { receiverId: string; frequencyHz: number | null; mode: ReceiverMode | null; bandwidthHz: number | null } | null;
   onInitialUrlTuneApplied?: () => void;
 };
 
@@ -104,6 +104,7 @@ export function WebSdrUi({
   const frequencySetNonceRef = useRef(0);
   const resetTuneNonceRef = useRef(0);
   const suppressAutoBandRef = useRef(false);
+  const suppressAutoBandUntilRef = useRef(0);
   const lastAutoBandKeyRef = useRef<string | null>(null);
   const canWbfm = (audioMaxSps ?? 0) > 100_000;
   const [receiverSessionNonce, setReceiverSessionNonce] = useState(0);
@@ -111,9 +112,10 @@ export function WebSdrUi({
   const squelchTouchedRef = useRef(false);
   const [bands, setBands] = useState<BandOverlay[]>(DEFAULT_BANDS);
   const preferReceiverRef = useRef<Props['onPreferReceiverForFrequencyHz']>(onPreferReceiverForFrequencyHz);
-  const pendingExplicitTuneRef = useRef<null | { hz: number; mode: typeof mode; receiverId: string }>(null);
+  const pendingExplicitTuneRef = useRef<null | { hz: number; mode: typeof mode; bandwidthHz?: number; receiverId: string }>(null);
   const waterfallSettingsRef = useRef<WaterfallSettings | null>(null);
   const initialUrlTuneAppliedRef = useRef(false);
+  const retuneInFlightRef = useRef(false);
   const allowedColormapsRef = useRef<ColormapName[]>(['gqrx', 'rainbow', 'viridis', 'twentev2']);
 
   useEffect(() => {
@@ -166,7 +168,7 @@ export function WebSdrUi({
   }, []);
 
   const passbandForTune = useCallback(
-    (settings: WaterfallSettings, hz: number, nextMode: typeof mode) => {
+    (settings: WaterfallSettings, hz: number, nextMode: typeof mode, requestedBandwidthHz?: number) => {
       const fft = settings.fft_result_size;
       const base = settings.basefreq;
       const bw = settings.total_bandwidth;
@@ -184,7 +186,7 @@ export function WebSdrUi({
       const ssbLowCutHz = Math.max(0, Math.floor(Number(ssbLowCutHzRaw) || 0));
       const ssbHighCutHz = Math.max(ssbLowCutHz + 1, Math.floor(Number(ssbHighCutHzRaw) || 0));
 
-      const spanHz =
+      const automaticSpanHz =
         nextMode === 'USB' || nextMode === 'LSB'
           ? Math.max(100, ssbHighCutHz - ssbLowCutHz)
           : nextMode === 'WBFM'
@@ -196,6 +198,9 @@ export function WebSdrUi({
                 : nextMode === 'CW'
                   ? 400
                   : 2_700;
+      const spanHz = requestedBandwidthHz != null && Number.isFinite(requestedBandwidthHz)
+        ? Math.max(100, Math.min(250_000, requestedBandwidthHz))
+        : automaticSpanHz;
       const spanIdx = (spanHz / bw) * fft;
       const cwBfoIdx = (cwBfoHz / bw) * fft;
 
@@ -203,15 +208,14 @@ export function WebSdrUi({
       const clampM = (v: number) => Math.max(0, Math.min(maxIdx, v));
       const carrierIdx = clampM(centerIdx);
       const ssbLowCutIdx = (ssbLowCutHz / bw) * fft;
-      const ssbHighCutIdx = (ssbHighCutHz / bw) * fft;
 
       let l = clampIdx(carrierIdx - spanIdx / 2);
       let r = clampIdx(carrierIdx + spanIdx / 2);
       if (nextMode === 'USB') {
         l = clampIdx(carrierIdx + ssbLowCutIdx);
-        r = clampIdx(carrierIdx + ssbHighCutIdx);
+        r = clampIdx(carrierIdx + ssbLowCutIdx + spanIdx);
       } else if (nextMode === 'LSB') {
-        l = clampIdx(carrierIdx - ssbHighCutIdx);
+        l = clampIdx(carrierIdx - ssbLowCutIdx - spanIdx);
         r = clampIdx(carrierIdx - ssbLowCutIdx);
       } else if (nextMode === 'CW') {
         const toneCenter = carrierIdx + cwBfoIdx;
@@ -233,7 +237,7 @@ export function WebSdrUi({
 
   const setModeForActiveVfo = useCallback(
     (nextMode: typeof mode) => {
-      const sanitized = nextMode === 'WBFM' && !canWbfm ? 'FM' : nextMode;
+      const sanitized = nextMode === 'WBFM' && audioMaxSps !== null && !canWbfm ? 'FM' : nextMode;
       // Avoid creating an update loop by re-applying the same mode and
       // emitting new passbandSet nonces while React state is catching up.
       if (liveRef.current.mode === sanitized) return;
@@ -258,32 +262,72 @@ export function WebSdrUi({
       passbandSetNonceRef.current += 1;
       setPassbandSet({ nonce: passbandSetNonceRef.current, l: pb.l, m: pb.m, r: pb.r });
     },
-    [canWbfm, passbandForTune, writeActiveVfo],
+    [audioMaxSps, canWbfm, passbandForTune, writeActiveVfo],
   );
 
+  useEffect(() => {
+    if (audioMaxSps === null || canWbfm || liveRef.current.mode !== 'WBFM') return;
+    setModeForActiveVfo('FM');
+  }, [audioMaxSps, canWbfm, setModeForActiveVfo]);
+
   const tuneTo = useCallback(
-    (hz: number, nextMode?: typeof mode, receiverOverride?: string) => {
+    (hz: number, nextMode?: typeof mode, receiverOverride?: string, bandwidthHz?: number) => {
       const targetHz = Math.round(hz);
       if (!Number.isFinite(targetHz) || targetHz <= 0) return;
 
       const requestedReceiverId = receiverOverride ?? (preferReceiverRef.current?.(targetHz) ?? receiverId);
       const rawMode = nextMode ?? liveRef.current.mode;
-      const sanitizedMode = rawMode === 'WBFM' && !canWbfm ? 'FM' : rawMode;
+      const sanitizedMode = rawMode === 'WBFM' && audioMaxSps !== null && !canWbfm ? 'FM' : rawMode;
+      const settings = waterfallSettingsRef.current;
+      const halfSpanHz = Math.max(1_000, (bandwidthHz ?? 0) / 2);
+      const requiresHardwareRetune = settings != null && (
+        targetHz - halfSpanHz < settings.basefreq ||
+        targetHz + halfSpanHz > settings.basefreq + settings.total_bandwidth
+      );
+      if (requiresHardwareRetune && requestedReceiverId) {
+        if (!retuneInFlightRef.current) {
+          retuneInFlightRef.current = true;
+          void fetch('/api/receiver/retune', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ receiver_id: requestedReceiverId, frequency_hz: targetHz }),
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              const detail = await response.text();
+              throw new Error(detail || `HTTP ${response.status}`);
+            }
+            const url = new URL(window.location.href);
+            url.searchParams.set('frequency', String(targetHz));
+            url.searchParams.set('modulation', sanitizedMode);
+            if (bandwidthHz != null) url.searchParams.set('bandwidth', String(Math.round(bandwidthHz)));
+            else url.searchParams.delete('bandwidth');
+            url.searchParams.set('rx', requestedReceiverId);
+            window.location.assign(url.toString());
+          })
+          .catch((error) => {
+            retuneInFlightRef.current = false;
+            console.error('Failed to retune receiver', error);
+            window.alert('Nie udało się przestroić PlutoSDR. Sprawdź połączenie z pluto.local.');
+          });
+        }
+        return;
+      }
       if (requestedReceiverId && requestedReceiverId !== receiverId) {
         defaultsAppliedRef.current = false;
         suppressAutoBandRef.current = true;
-        pendingExplicitTuneRef.current = { hz: targetHz, mode: sanitizedMode, receiverId: requestedReceiverId };
+        pendingExplicitTuneRef.current = { hz: targetHz, mode: sanitizedMode, bandwidthHz, receiverId: requestedReceiverId };
         onReceiverChange?.(requestedReceiverId);
         return;
       }
 
       if (nextMode) {
         suppressAutoBandRef.current = true;
+        suppressAutoBandUntilRef.current = Date.now() + 3_000;
         setModeForActiveVfo(nextMode);
 
-        const settings = waterfallSettingsRef.current;
         if (settings) {
-          const pb = passbandForTune(settings, targetHz, sanitizedMode);
+          const pb = passbandForTune(settings, targetHz, sanitizedMode, bandwidthHz);
           if (pb) {
             passbandSetNonceRef.current += 1;
             setPassbandSet({ nonce: passbandSetNonceRef.current, l: pb.l, m: pb.m, r: pb.r });
@@ -291,14 +335,13 @@ export function WebSdrUi({
         }
       }
 
-      const settings = waterfallSettingsRef.current;
       if (!settings && receiverId) {
-        pendingExplicitTuneRef.current = { hz: targetHz, mode: sanitizedMode, receiverId };
+        pendingExplicitTuneRef.current = { hz: targetHz, mode: sanitizedMode, bandwidthHz, receiverId };
       }
       defaultsAppliedRef.current = true;
       requestFrequencySetHz(targetHz);
     },
-    [canWbfm, onReceiverChange, passbandForTune, receiverId, requestFrequencySetHz, setModeForActiveVfo],
+    [audioMaxSps, canWbfm, onReceiverChange, passbandForTune, receiverId, requestFrequencySetHz, setModeForActiveVfo],
   );
 
   useEffect(() => {
@@ -424,7 +467,12 @@ export function WebSdrUi({
     suppressAutoBandRef.current = true;
 
     if (initialUrlTune.frequencyHz != null) {
-      tuneTo(initialUrlTune.frequencyHz, initialUrlTune.mode ?? undefined, receiverId);
+      tuneTo(
+        initialUrlTune.frequencyHz,
+        initialUrlTune.mode ?? undefined,
+        receiverId,
+        initialUrlTune.bandwidthHz ?? undefined,
+      );
     } else if (initialUrlTune.mode != null) {
       setModeForActiveVfo(initialUrlTune.mode);
     }
@@ -434,8 +482,9 @@ export function WebSdrUi({
 
   const maybeApplyAutoBandMode = useCallback(
     (nextCenterHz: number) => {
-      if (!autoBandMode) return;
-      if (suppressAutoBandRef.current) {
+    if (!autoBandMode) return;
+    if (Date.now() < suppressAutoBandUntilRef.current) return;
+    if (suppressAutoBandRef.current) {
         suppressAutoBandRef.current = false;
         return;
       }
@@ -616,6 +665,7 @@ export function WebSdrUi({
           receiverId={receiverId}
           mode={mode}
           centerHz={centerHz}
+          bandwidthHz={bandwidthHz}
           audioMaxSps={audioMaxSps}
           onSetMode={setModeForActiveVfo}
           frequencyAdjust={frequencyAdjust}
@@ -641,13 +691,16 @@ export function WebSdrUi({
           onSetFrequencyHz={(hz) => {
             tuneTo(hz);
           }}
+          onTunePreset={(hz, presetMode, presetBandwidthHz) => {
+            tuneTo(hz, presetMode, undefined, presetBandwidthHz);
+          }}
           onPassbandChange={handlePassbandChange}
           onServerSettings={(s) => {
             waterfallSettingsRef.current = s;
             const pending = pendingExplicitTuneRef.current;
             if (!pending) return;
             if (pending.receiverId !== receiverId) return;
-            const pb = passbandForTune(s, pending.hz, pending.mode);
+            const pb = passbandForTune(s, pending.hz, pending.mode, pending.bandwidthHz);
             if (!pb) return;
             passbandSetNonceRef.current += 1;
             setPassbandSet({ nonce: passbandSetNonceRef.current, l: pb.l, m: pb.m, r: pb.r });
@@ -658,6 +711,7 @@ export function WebSdrUi({
             if (pending && pending.receiverId === receiverId) {
               defaultsAppliedRef.current = true;
               suppressAutoBandRef.current = true;
+              suppressAutoBandUntilRef.current = Date.now() + 3_000;
               setModeForActiveVfo(pending.mode);
               requestFrequencySetHz(pending.hz);
               return;

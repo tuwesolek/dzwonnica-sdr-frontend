@@ -26,6 +26,7 @@ type InitialUrlTune = {
   receiverId: string;
   frequencyHz: number | null;
   mode: ReceiverMode | null;
+  bandwidthHz: number | null;
 };
 
 function readUrlReceiverMode(url: URL): ReceiverMode | null {
@@ -161,6 +162,10 @@ export default function App() {
     const frequencyRaw = url.searchParams.get('frequency');
     const rxRaw = url.searchParams.get('rx');
     const mode = readUrlReceiverMode(url);
+    const bandwidthRaw = Number(url.searchParams.get('bandwidth'));
+    const bandwidthHz = Number.isFinite(bandwidthRaw) && bandwidthRaw >= 100 && bandwidthRaw <= 250_000
+      ? Math.round(bandwidthRaw)
+      : null;
 
     if (!frequencyRaw && !rxRaw && !mode) {
       initialUrlSelectionAppliedRef.current = true;
@@ -181,7 +186,7 @@ export default function App() {
     if (frequencyHz == null && mode == null) return;
     const targetReceiverId = pickedReceiverId ?? receiverId ?? receivers.value.active_receiver_id;
     if (!targetReceiverId) return;
-    setInitialUrlTune({ receiverId: targetReceiverId, frequencyHz, mode });
+    setInitialUrlTune({ receiverId: targetReceiverId, frequencyHz, mode, bandwidthHz });
   }, [receiverId, receivers]);
 
   useEffect(() => {

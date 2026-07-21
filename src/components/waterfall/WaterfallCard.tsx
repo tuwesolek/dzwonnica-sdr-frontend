@@ -1,6 +1,6 @@
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bookmark as BookmarkIcon, Copy, Cpu, Download, Layers, Link2, Radio, Trash2, Upload } from 'lucide-react';
+import { Bookmark as BookmarkIcon, BookOpen, Copy, Cpu, Download, Layers, Link2, Radio, Trash2, Upload } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -30,11 +30,15 @@ import { MobileWaterfallBar } from './MobileWaterfallBar';
 import type { WaterfallDisplaySettings } from './viewSettings';
 import { AnimatedBottomSheet } from '../ui/animated-bottom-sheet';
 import type { ReceiverMode } from '../../lib/receiverMode';
+import { formatPresetBandwidth } from '../../data/signalPresets';
+import type { SignalPreset } from '../../data/signalPresets';
+import { PresetLibrary } from './PresetLibrary';
 
 type Props = {
   receiverId: string | null;
   mode: ReceiverMode;
   centerHz: number | null;
+  bandwidthHz: number | null;
   audioMaxSps?: number | null;
   onSetMode?: (mode: Props['mode']) => void;
   frequencyAdjust: { nonce: number; deltaHz: number } | null;
@@ -58,6 +62,7 @@ type Props = {
   onViewportChange?: (vp: { l: number; r: number }) => void;
   onTuningChange: (t: { centerHz: number; bandwidthHz: number }) => void;
   onSetFrequencyHz?: (hz: number) => void;
+  onTunePreset?: (hz: number, mode: ReceiverMode, bandwidthHz: number) => void;
   onPassbandChange?: (p: { l: number; m: number; r: number }) => void;
   onServerDefaults?: (d: WaterfallSettings['defaults']) => void;
   onServerSettings?: (s: WaterfallSettings) => void;
@@ -139,6 +144,7 @@ export function WaterfallCard({
   receiverId,
   mode,
   centerHz,
+  bandwidthHz,
   audioMaxSps,
   onSetMode,
   frequencyAdjust,
@@ -162,6 +168,7 @@ export function WaterfallCard({
   onViewportChange,
   onTuningChange,
   onSetFrequencyHz,
+  onTunePreset,
   onPassbandChange,
   onServerDefaults,
   onServerSettings,
@@ -172,12 +179,14 @@ export function WaterfallCard({
   const [bands, setBands] = useState<BandOverlay[]>(DEFAULT_BANDS);
   const [error, setError] = useState<string | null>(null);
   const [bandsOpen, setBandsOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [decodersOpen, setDecodersOpen] = useState(false);
   const [decodesOpen, setDecodesOpen] = useState(false);
   const [mobileZoomOpen, setMobileZoomOpen] = useState(false);
   const [mobileBandsOpen, setMobileBandsOpen] = useState(false);
+  const [mobilePresetsOpen, setMobilePresetsOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [mobileDecodersOpen, setMobileDecodersOpen] = useState(false);
   const [mobileBookmarksOpen, setMobileBookmarksOpen] = useState(false);
@@ -325,6 +334,7 @@ export function WaterfallCard({
       name,
       frequencyHz: Math.round(centerHz),
       mode,
+      bandwidthHz: bandwidthHz == null ? undefined : Math.round(bandwidthHz),
       notes: bookmarkNotes.trim() || undefined,
       createdAtMs: Date.now(),
     };
@@ -335,7 +345,7 @@ export function WaterfallCard({
     });
     setBookmarkName('');
     setBookmarkNotes('');
-  }, [bookmarkName, bookmarkNotes, centerHz, mode]);
+  }, [bandwidthHz, bookmarkName, bookmarkNotes, centerHz, mode]);
 
   const deleteBookmark = useCallback((id: string) => {
     setBookmarks((prev) => {
@@ -347,12 +357,26 @@ export function WaterfallCard({
 
   const tuneToBookmark = useCallback(
     (b: Bookmark) => {
-      onSetMode?.(b.mode);
-      onSetFrequencyHz?.(b.frequencyHz);
+      if (onTunePreset) onTunePreset(b.frequencyHz, b.mode, b.bandwidthHz ?? defaultBandwidthForMode(b.mode));
+      else {
+        onSetMode?.(b.mode);
+        onSetFrequencyHz?.(b.frequencyHz);
+      }
       setBookmarkOpen(false);
+      setMobileBookmarksOpen(false);
     },
-    [onSetFrequencyHz, onSetMode],
+    [onSetFrequencyHz, onSetMode, onTunePreset],
   );
+
+  const tuneToPreset = useCallback((item: SignalPreset) => {
+    if (onTunePreset) onTunePreset(item.frequencyHz, item.mode, item.bandwidthHz);
+    else {
+      onSetMode?.(item.mode);
+      onSetFrequencyHz?.(item.frequencyHz);
+    }
+    setPresetsOpen(false);
+    setMobilePresetsOpen(false);
+  }, [onSetFrequencyHz, onSetMode, onTunePreset]);
 
   const handleExport = useCallback(() => {
     const data = exportBookmarks(bookmarks);
@@ -405,6 +429,7 @@ export function WaterfallCard({
     const url = new URL(window.location.href);
     url.searchParams.set('frequency', String(Math.round(b.frequencyHz)));
     url.searchParams.set('modulation', b.mode);
+    if (b.bandwidthHz) url.searchParams.set('bandwidth', String(Math.round(b.bandwidthHz)));
     if (receiverId) url.searchParams.set('rx', receiverId);
     return url.toString();
   }, [receiverId]);
@@ -504,6 +529,27 @@ export function WaterfallCard({
           </div>
 
           <div className="hidden items-center gap-2 sm:flex">
+            <AnimatedDialog
+              open={presetsOpen}
+              onOpenChange={setPresetsOpen}
+              title="Biblioteka częstotliwości"
+              description="Znane sygnały w zakresie PlutoSDR — częstotliwość, tryb i bandwidth ustawiane jednym kliknięciem."
+              trigger={
+                <Button type="button" variant="secondary" className="gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Presety
+                </Button>
+              }
+              contentClassName="max-w-5xl"
+              footer={
+                <Button type="button" variant="secondary" onClick={() => setPresetsOpen(false)}>
+                  Zamknij
+                </Button>
+              }
+            >
+              <PresetLibrary onTune={tuneToPreset} />
+            </AnimatedDialog>
+
             <DropdownMenuPrimitive.Root open={bandsOpen} onOpenChange={setBandsOpen} modal={false}>
               <DropdownMenuPrimitive.Trigger asChild>
                 <Button type="button" variant="secondary" className="gap-2">
@@ -851,6 +897,12 @@ export function WaterfallCard({
                                 <span className="font-mono font-medium">{(b.frequencyHz / 1_000_000).toFixed(3)} MHz</span>
                                 <span>·</span>
                                 <span className="font-medium">{b.mode}</span>
+                                {b.bandwidthHz ? (
+                                  <>
+                                    <span>·</span>
+                                    <span>{formatPresetBandwidth(b.bandwidthHz)}</span>
+                                  </>
+                                ) : null}
                               </div>
                               {b.notes ? <div className="mt-1.5 line-clamp-1 text-xs text-muted-foreground/80">{b.notes}</div> : null}
                             </div>
@@ -988,6 +1040,18 @@ export function WaterfallCard({
               className="h-12 justify-start"
               onClick={() => {
                 setMobileMoreOpen(false);
+                window.setTimeout(() => setMobilePresetsOpen(true), 0);
+              }}
+            >
+              <BookOpen className="h-4 w-4" />
+              Biblioteka presetów
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-12 justify-start"
+              onClick={() => {
+                setMobileMoreOpen(false);
                 window.setTimeout(() => setMobileDecodersOpen(true), 0);
               }}
             >
@@ -1005,6 +1069,16 @@ export function WaterfallCard({
               Share link
             </Button>
           </div>
+        </AnimatedBottomSheet>
+
+        <AnimatedBottomSheet
+          open={mobilePresetsOpen}
+          onOpenChange={setMobilePresetsOpen}
+          title="Biblioteka częstotliwości"
+          description="Częstotliwość, tryb i bandwidth jednym kliknięciem."
+          contentClassName="max-h-[90vh] overflow-hidden"
+        >
+          <PresetLibrary onTune={tuneToPreset} compact />
         </AnimatedBottomSheet>
 
         <AnimatedBottomSheet
@@ -1171,6 +1245,12 @@ export function WaterfallCard({
                               <span className="font-mono font-medium">{(b.frequencyHz / 1_000_000).toFixed(3)} MHz</span>
                               <span>·</span>
                               <span className="font-medium">{b.mode}</span>
+                              {b.bandwidthHz ? (
+                                <>
+                                  <span>·</span>
+                                  <span>{formatPresetBandwidth(b.bandwidthHz)}</span>
+                                </>
+                              ) : null}
                             </div>
                             {b.notes ? <div className="mt-1.5 line-clamp-1 text-xs text-muted-foreground/80">{b.notes}</div> : null}
                           </div>
@@ -1222,6 +1302,14 @@ function BandSection({
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function defaultBandwidthForMode(mode: ReceiverMode): number {
+  if (mode === 'WBFM') return 180_000;
+  if (mode === 'FM' || mode === 'FMC') return 12_500;
+  if (mode === 'AM' || mode === 'SAM') return 10_000;
+  if (mode === 'CW') return 400;
+  return 2_700;
 }
 
 function clampInt(v: number, lo: number, hi: number) {
