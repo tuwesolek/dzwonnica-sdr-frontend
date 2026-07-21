@@ -593,7 +593,7 @@ export function WebSdrUi({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1320px] flex-col px-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-4 sm:pt-4 lg:min-h-0 lg:overflow-hidden">
+    <div className="dzwonnica-console mx-auto flex h-full w-full max-w-[1320px] flex-col px-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-4 sm:pt-4 lg:min-h-0 lg:overflow-hidden">
       {audioGateOpen ? (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-background/40 backdrop-blur-md"

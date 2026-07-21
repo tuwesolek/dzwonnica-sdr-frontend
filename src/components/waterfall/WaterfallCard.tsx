@@ -900,7 +900,7 @@ export function WaterfallCard({
               open={shareOpen}
               onOpenChange={setShareOpen}
               title="Share link"
-              description="Copy a URL that opens NovaSDR tuned to the current frequency."
+              description="Copy a URL that opens Dzwonnica SDR tuned to the current frequency."
               trigger={
                 <Button type="button" variant="secondary" className="gap-2">
                   <Link2 className="h-4 w-4" />
@@ -1097,7 +1097,7 @@ export function WaterfallCard({
           open={mobileShareOpen}
           onOpenChange={setMobileShareOpen}
           title="Share link"
-          description="Copy a URL that opens NovaSDR tuned to the current frequency."
+          description="Copy a URL that opens Dzwonnica SDR tuned to the current frequency."
           contentClassName="max-h-[55vh] overflow-hidden"
           footer={
             <div className="flex gap-2">

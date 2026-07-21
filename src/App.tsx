@@ -223,7 +223,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-dvh bg-background text-foreground">
+    <div className="dzwonnica-shell relative min-h-dvh bg-background text-foreground">
       <BackgroundImage />
       <div className="relative z-20 flex min-h-dvh flex-col">
         <BackendReconnectOverlay />
@@ -243,7 +243,7 @@ export default function App() {
           persistSettings={persistSettings}
           onPersistSettingsChange={setPersistSettings}
         />
-        <main className="flex-1 bg-muted/20 lg:min-h-0 lg:overflow-hidden">
+        <main className="dzwonnica-main flex-1 bg-muted/20 lg:min-h-0 lg:overflow-hidden">
           <WebSdrUi 
             receiverId={receiverId}
             onReceiverChange={setReceiverId}

@@ -1,4 +1,4 @@
-import { ChevronDown, ExternalLink, Github, Keyboard, Moon, Search, Settings, Sun } from 'lucide-react';
+import { Bell, ChevronDown, ExternalLink, Github, Keyboard, Moon, Search, Settings, Sun } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -54,7 +54,7 @@ export function WebSdrHeader({
   onPersistSettingsChange,
 }: Props) {
   const [info, setInfo] = useState<ServerInfoState>({ kind: 'loading' });
-  const [theme, setTheme] = useState<ThemePreference>(() => getStoredTheme() ?? 'system');
+  const [theme, setTheme] = useState<ThemePreference>(() => getStoredTheme() ?? 'dark');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [keybindsOpen, setKeybindsOpen] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
@@ -86,7 +86,7 @@ export function WebSdrHeader({
 
   const title = useMemo(() => {
     if (info.kind === 'ready' && info.value.serverName) return info.value.serverName;
-    return 'NovaSDR';
+    return 'Dzwonnica SDR';
   }, [info]);
 
   const subtitle = useMemo(() => {
@@ -135,8 +135,8 @@ export function WebSdrHeader({
   const resolvedTheme = useMemo(() => resolveTheme(theme), [theme]);
 
   return (
-    <header className="z-20 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-      <div className="mx-auto flex h-10 w-full max-w-[1320px] items-center gap-2 px-3 sm:px-4">
+    <header className="dzwonnica-header z-20 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <div className="mx-auto flex h-14 w-full max-w-[1320px] items-center gap-2 px-3 sm:px-4">
         {headerPanel ? (
           <Button
             type="button"
@@ -151,9 +151,15 @@ export function WebSdrHeader({
           </Button>
         ) : null}
 
+        <div className="brand-medallion" aria-hidden="true">
+          <Bell className="h-5 w-5" strokeWidth={1.7} />
+        </div>
+
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold tracking-tight leading-4">{title}</div>
-          {subtitle ? <div className="hidden truncate text-[11px] text-muted-foreground sm:block">{subtitle}</div> : null}
+          <div className="brand-title truncate text-[15px] font-semibold leading-4">{title}</div>
+          <div className="brand-subtitle hidden truncate text-[9px] uppercase sm:block">
+            {subtitle || 'Sygnał · Harmonia · Eter'}
+          </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -258,12 +264,12 @@ export function WebSdrHeader({
             </div>
           </AnimatedDialog>
 
-          <a href="https://github.com/Steven9101/novasdr-develop" target="_blank" rel="noreferrer">
+          <a href="https://github.com/tuwesolek/dzwonnica-sdr" target="_blank" rel="noreferrer">
             <Button type="button" variant="secondary" size="icon" className="h-8 w-8 sm:hidden" aria-label="GitHub">
               <Github className="h-4 w-4" />
             </Button>
           </a>
-          <a href="https://github.com/Steven9101/novasdr-develop" target="_blank" rel="noreferrer" className="hidden sm:inline-flex">
+          <a href="https://github.com/tuwesolek/dzwonnica-sdr" target="_blank" rel="noreferrer" className="hidden sm:inline-flex">
             <Button type="button" variant="secondary" size="sm" className="gap-2">
               <Github className="h-4 w-4" />
               GitHub
@@ -271,6 +277,8 @@ export function WebSdrHeader({
           </a>
         </div>
       </div>
+
+      <div className="ornament-divider" aria-hidden="true"><span>✦</span></div>
 
 
       <AnimatePresence initial={false}>
@@ -512,4 +520,3 @@ function maidenheadToCoords(locator: string): { lat: number; lon: number } | nul
 
   return { lat, lon };
 }
-
